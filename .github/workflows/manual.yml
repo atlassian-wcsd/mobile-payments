@@ -1,0 +1,41 @@
+name: JSM Issue Closed Webhook
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  send-webhook:
+    if: contains(github.event.issue.labels.*.name, 'JSM')
+    runs-on: ubuntu-latest
+    steps:
+    - name: Extract and Filter Labels
+      id: filter_labels
+      run: |
+        labels=$(jq -r '.issue.labels | map(.name) | join(",")' $GITHUB_EVENT_PATH)
+        jira_labels=$(echo $labels | tr ',' '\n' | grep -E '^[A-Z]+-[0-9]+$' | tr '\n' ',' | sed 's/,$//')
+        echo "::set-output name=jira_labels::$jira_labels"
+
+        
+    - name: Send Webhook
+      uses: actions/github-script@v3
+      with:
+        script: |
+          const ISSUE_URL = "${{ github.event.issue.html_url }}"
+          const jiraLabels = "${{ steps.filter_labels.outputs.jira_labels }}";
+                  
+          const webhookUrl = "https://automation.atlassian.com/pro/hooks/03ade4084726b3f19ec62b92170435d4fe80af9d";        
+          
+          const payload = JSON.stringify({ issues: jiraLabels.split(","), GitHub_issue_url: ISSUE_URL});
+
+          const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: payload,
+          });
+          if (!response.ok) {
+            throw new Error(`Webhook request failed: ${response.statusText}`);
+          }
+
