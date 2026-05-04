@@ -31,6 +31,69 @@ Resources:
         service_name: open_devops_image_rec
         resource_owner: wmarusiak
 
+  PaymentMethodsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: submitImage/
+      Handler: bootstrap
+      Runtime: provided.al2
+      Tracing: Active
+      Environment:
+        Variables:
+          HANDLER_MODE: payment
+      Policies:
+        - AmazonDynamoDBFullAccess
+      Events:
+        ListMethods:
+          Type: Api
+          Properties:
+            Path: /payment/methods
+            Method: GET
+        GetMethod:
+          Type: Api
+          Properties:
+            Path: /payment/methods/{methodId}
+            Method: GET
+        ExpandMethod:
+          Type: Api
+          Properties:
+            Path: /payment/methods/{methodId}/expand
+            Method: GET
+        RedirectMethod:
+          Type: Api
+          Properties:
+            Path: /payment/methods/{methodId}/redirect
+            Method: GET
+        SelectMethod:
+          Type: Api
+          Properties:
+            Path: /payment/methods/{methodId}/select
+            Method: POST
+      Tags:
+        Name: paymentMethods
+        business_unit: agile_devops_pmm
+        service_name: open_devops_payment
+        resource_owner: wmarusiak
+
+  PaymentMethodsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: PaymentMethods
+      AttributeDefinitions:
+        - AttributeName: UserId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: UserId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: Name
+          Value: PaymentMethodsTable
+        - Key: service_name
+          Value: open_devops_payment
+
 Outputs:
   SubmitImageAPI:
     Description: "API Gateway endpoint URL for Prod environment for Submit Image Function"
@@ -46,3 +109,12 @@ Outputs:
     Value: !Ref SubmitImageFunction
     Export:
       Name: SubmitImageFunctionName
+  PaymentMethodsAPI:
+    Description: "API Gateway endpoint URL for Prod environment for Payment Methods Function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/payment/methods"
+  PaymentMethodsFunction:
+    Description: "Payment Methods Lambda Function ARN"
+    Value: !GetAtt PaymentMethodsFunction.Arn
+  PaymentMethodsFunctionIamRole:
+    Description: "Implicit IAM Role created for Payment Methods function"
+    Value: !GetAtt PaymentMethodsFunctionRole.Arn
