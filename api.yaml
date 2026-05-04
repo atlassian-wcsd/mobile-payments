@@ -7,6 +7,124 @@ info:
 servers:
   - url: http://petstore.swagger.io/v1
 paths:
+  /payments/methods:
+    get:
+      summary: List all payment methods
+      operationId: listPaymentMethods
+      tags:
+        - payments
+      responses:
+        '200':
+          description: List of all available payment methods with icons
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentMethodsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /payments/methods/{methodId}:
+    get:
+      summary: Get expanded details for a specific payment method
+      operationId: getPaymentMethod
+      tags:
+        - payments
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          description: The ID of the payment method to retrieve
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Expanded view of a payment method with fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentMethod"
+        '404':
+          description: Payment method not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /payments/redirect/{methodType}:
+    get:
+      summary: Get automatic redirect URL for a payment method
+      operationId: getPaymentRedirect
+      tags:
+        - payments
+      parameters:
+        - name: methodType
+          in: path
+          required: true
+          description: "The payment method type (internet_banking, banking_app, paypal)"
+          schema:
+            type: string
+            enum:
+              - internet_banking
+              - banking_app
+              - paypal
+        - name: order_id
+          in: query
+          required: true
+          description: The order ID for the payment
+          schema:
+            type: string
+        - name: amount
+          in: query
+          required: true
+          description: The payment amount
+          schema:
+            type: string
+        - name: currency
+          in: query
+          required: false
+          description: The currency code (defaults to USD)
+          schema:
+            type: string
+            default: USD
+        - name: callback_url
+          in: query
+          required: false
+          description: The callback URL after payment completion
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Redirect URL for the payment method
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentRedirectResponse"
+        '400':
+          description: Bad request - missing parameters or unsupported redirect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '404':
+          description: Payment method type not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /pets:
     get:
       summary: List all pets
@@ -94,6 +212,97 @@ paths:
                 $ref: "#/components/schemas/Error"
 components:
   schemas:
+    PaymentMethod:
+      type: object
+      required:
+        - id
+        - type
+        - display_name
+        - icon_url
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the payment method
+        type:
+          type: string
+          enum:
+            - credit_card
+            - debit_card
+            - internet_banking
+            - banking_app
+            - paypal
+          description: The type of payment method
+        display_name:
+          type: string
+          description: Human-readable name of the payment method
+        description:
+          type: string
+          description: Detailed description of the payment method
+        icon_url:
+          type: string
+          description: URL to the payment method icon
+        redirect_url:
+          type: string
+          description: Redirect URL template for redirect-based payment methods
+        is_expanded:
+          type: boolean
+          description: Whether the payment method details are in expanded view
+        fields:
+          type: array
+          description: Input fields required for this payment method (shown in expanded view)
+          items:
+            $ref: "#/components/schemas/PaymentField"
+    PaymentField:
+      type: object
+      required:
+        - name
+        - label
+        - type
+        - required
+      properties:
+        name:
+          type: string
+          description: Field identifier
+        label:
+          type: string
+          description: Human-readable label for the field
+        type:
+          type: string
+          description: "Input type (text, password, select, etc.)"
+        required:
+          type: boolean
+          description: Whether the field is required
+        placeholder:
+          type: string
+          description: Placeholder text for the field
+    PaymentMethodsResponse:
+      type: object
+      required:
+        - payment_methods
+        - count
+      properties:
+        payment_methods:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentMethod"
+        count:
+          type: integer
+          description: Total number of payment methods
+    PaymentRedirectResponse:
+      type: object
+      required:
+        - payment_method_type
+        - redirect_url
+      properties:
+        payment_method_type:
+          type: string
+          description: The type of payment method for the redirect
+        redirect_url:
+          type: string
+          description: The URL to redirect the user to
+        session_id:
+          type: string
+          description: Session identifier for tracking the payment
     Pet:
       type: object
       required:
