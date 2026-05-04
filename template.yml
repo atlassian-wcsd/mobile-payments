@@ -25,6 +25,21 @@ Resources:
           Properties:
             Path: /bootstrap
             Method: GET
+        ListPaymentMethods:
+          Type: Api
+          Properties:
+            Path: /payments/methods
+            Method: GET
+        GetPaymentMethod:
+          Type: Api
+          Properties:
+            Path: /payments/methods/{methodId}
+            Method: GET
+        PaymentRedirect:
+          Type: Api
+          Properties:
+            Path: /payments/redirect/{methodType}
+            Method: GET
       Tags:
         Name: submitImage
         business_unit: agile_devops_pmm

@@ -97,9 +97,51 @@ func isValidExtension(urlVal string) bool {
 }
 
 func (d *Dependency) Handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	path := request.Path
+	httpMethod := request.HTTPMethod
+
+	// Route payment-related requests
+	if strings.HasPrefix(path, "/payments") || strings.HasPrefix(path, "/Prod/payments") {
+		return d.routePaymentRequest(path, httpMethod, request)
+	}
+
+	// Default: original image submission handler
+	return d.handleImageSubmission(ctx, request)
+}
+
+// routePaymentRequest routes incoming requests to the appropriate payment handler.
+func (d *Dependency) routePaymentRequest(path string, httpMethod string, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Normalize path by removing /Prod prefix if present
+	normalizedPath := path
+	if strings.HasPrefix(normalizedPath, "/Prod") {
+		normalizedPath = strings.TrimPrefix(normalizedPath, "/Prod")
+	}
+
+	switch {
+	// GET /payments/methods - List all payment methods
+	case normalizedPath == "/payments/methods" && httpMethod == "GET":
+		return HandleListPaymentMethods()
+
+	// GET /payments/methods/{id} - Get expanded details for a specific payment method
+	case strings.HasPrefix(normalizedPath, "/payments/methods/") && httpMethod == "GET":
+		methodID := strings.TrimPrefix(normalizedPath, "/payments/methods/")
+		return HandleGetPaymentMethod(methodID)
+
+	// GET /payments/redirect/{type} - Get redirect URL for a payment method
+	case strings.HasPrefix(normalizedPath, "/payments/redirect/") && httpMethod == "GET":
+		methodType := strings.TrimPrefix(normalizedPath, "/payments/redirect/")
+		return HandlePaymentRedirect(methodType, request.QueryStringParameters)
+
+	default:
+		return errorResponse(404, fmt.Sprintf("payment route not found: %s %s", httpMethod, normalizedPath))
+	}
+}
+
+// handleImageSubmission processes the original image submission logic.
+func (d *Dependency) handleImageSubmission(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	lc, _ := lambdacontext.FromContext(ctx)
 	region := strings.Split(lc.InvokedFunctionArn, ":")[3]
-  aws_account_id := strings.Split(lc.InvokedFunctionArn, ":")[4]
+	aws_account_id := strings.Split(lc.InvokedFunctionArn, ":")[4]
 
 	urlParam, found := request.QueryStringParameters["url"]
 	if found {
