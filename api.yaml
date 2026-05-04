@@ -92,6 +92,170 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /payment/methods:
+    get:
+      summary: List all payment methods
+      operationId: listPaymentMethods
+      tags:
+        - payment
+      parameters:
+        - name: type
+          in: query
+          description: Filter payment methods by type (card, internet_banking, third_party_app, paypal, wallet)
+          required: false
+          schema:
+            type: string
+            enum:
+              - card
+              - internet_banking
+              - third_party_app
+              - paypal
+              - wallet
+      responses:
+        '200':
+          description: A list of available payment methods
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentMethodsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /payment/methods/{methodId}:
+    get:
+      summary: Get a specific payment method
+      operationId: getPaymentMethod
+      tags:
+        - payment
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          description: The ID of the payment method
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment method details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentMethod"
+        '404':
+          description: Payment method not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /payment/methods/{methodId}/expand:
+    get:
+      summary: Get expanded view of a payment method
+      operationId: getPaymentMethodExpanded
+      tags:
+        - payment
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          description: The ID of the payment method to expand
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Expanded payment method details including additional fields and instructions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentMethod"
+        '404':
+          description: Payment method not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /payment/methods/{methodId}/redirect:
+    get:
+      summary: Get redirect URL for a payment method
+      operationId: getPaymentMethodRedirect
+      tags:
+        - payment
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          description: The ID of the payment method (internet_banking, third_party_app, or paypal)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Redirect information for the payment method
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedirectResponse"
+        '400':
+          description: Payment method does not support redirection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '404':
+          description: Payment method not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /payment/methods/{methodId}/select:
+    post:
+      summary: Select a payment method
+      operationId: selectPaymentMethod
+      tags:
+        - payment
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          description: The ID of the payment method to select
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+              properties:
+                user_id:
+                  type: string
+        required: true
+      responses:
+        '200':
+          description: Payment method selection recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '404':
+          description: Payment method not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   schemas:
     Pet:
@@ -112,6 +276,79 @@ components:
       maxItems: 100
       items:
         $ref: "#/components/schemas/Pet"
+    PaymentMethod:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - icon
+        - enabled
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum:
+            - card
+            - internet_banking
+            - third_party_app
+            - paypal
+            - wallet
+        icon:
+          type: string
+          description: URL to the payment method icon
+        description:
+          type: string
+        redirect_url:
+          type: string
+          description: URL for automatic redirection (internet banking, 3rd party apps, PayPal)
+        is_expandable:
+          type: boolean
+        expanded_details:
+          $ref: "#/components/schemas/ExpandedDetails"
+        enabled:
+          type: boolean
+    ExpandedDetails:
+      type: object
+      properties:
+        instructions:
+          type: string
+        fields:
+          type: array
+          items:
+            type: string
+        supported_banks:
+          type: array
+          items:
+            type: string
+        processing_time:
+          type: string
+        fees:
+          type: string
+    PaymentMethodsResponse:
+      type: object
+      properties:
+        payment_methods:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentMethod"
+        total:
+          type: integer
+    RedirectResponse:
+      type: object
+      properties:
+        payment_method_id:
+          type: string
+        redirect_url:
+          type: string
+        session_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Redirect URL expiry in seconds
     Error:
       type: object
       required:
