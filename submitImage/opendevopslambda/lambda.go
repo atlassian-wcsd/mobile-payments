@@ -3,6 +3,7 @@ package opendevopslambda
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
@@ -16,18 +17,42 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
 type Dependency struct {
-	DepS3 s3iface.S3API
-	DepDynamoDB dynamodbiface.DynamoDBAPI
+	DepS3         s3iface.S3API
+	DepDynamoDB   dynamodbiface.DynamoDBAPI
+	DepHTTPClient httpClient
+	DepHTTPGet    func(string) (*http.Response, error)
 }
 
 var bucketRootName = "open-devops-images"
 
+const (
+	defaultPushProvider = "FCM"
+	defaultFCMEndpoint  = "https://fcm.googleapis.com/fcm/send"
+)
+
+type httpClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+type pushNotificationRequest struct {
+	Token   string `json:"token"`
+	Title   string `json:"title"`
+	Message string `json:"message"`
+	Consent bool   `json:"consent"`
+}
+
 func (d *Dependency) processRequest(imageUrl string, region string, aws_account_id string) (string, error) {
-	response, err := http.Get(imageUrl)
+	httpGet := d.DepHTTPGet
+	if httpGet == nil {
+		httpGet = http.Get
+	}
+
+	response, err := httpGet(imageUrl)
 	if err != nil {
 		return "", err
 	}
@@ -80,6 +105,69 @@ func (d *Dependency) processRequest(imageUrl string, region string, aws_account_
 	return imageUuid.String(), nil
 }
 
+func (d *Dependency) sendPushNotification(req pushNotificationRequest) error {
+	if !req.Consent {
+		return errors.New("user consent is required")
+	}
+	if req.Token == "" || req.Title == "" || req.Message == "" {
+		return errors.New("token, title, and message are required")
+	}
+
+	pushProvider := os.Getenv("PUSH_PROVIDER")
+	if pushProvider == "" {
+		pushProvider = defaultPushProvider
+	}
+
+	if strings.ToUpper(pushProvider) != defaultPushProvider {
+		return fmt.Errorf("unsupported push provider: %s", pushProvider)
+	}
+
+	serverKey := os.Getenv("FCM_SERVER_KEY")
+	if serverKey == "" {
+		return errors.New("missing FCM_SERVER_KEY")
+	}
+
+	fcmEndpoint := os.Getenv("FCM_ENDPOINT")
+	if fcmEndpoint == "" {
+		fcmEndpoint = defaultFCMEndpoint
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"to": req.Token,
+		"notification": map[string]string{
+			"title": req.Title,
+			"body":  req.Message,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	httpDep := d.DepHTTPClient
+	if httpDep == nil {
+		httpDep = http.DefaultClient
+	}
+
+	httpReq, err := http.NewRequest(http.MethodPost, fcmEndpoint, bytes.NewBuffer(payload))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Authorization", "key="+serverKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	response, err := httpDep.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("push provider returned non-success status: %d", response.StatusCode)
+	}
+
+	return nil
+}
+
 func isValidExtension(urlVal string) bool {
 	validExtensions := []string{"jpeg", "jpg", "bmp", "png", "tiff", "gif", "tif"}
 
@@ -97,36 +185,58 @@ func isValidExtension(urlVal string) bool {
 }
 
 func (d *Dependency) Handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	if request.Path == "/notifications" {
+		var pushReq pushNotificationRequest
+		if err := json.Unmarshal([]byte(request.Body), &pushReq); err != nil {
+			return events.APIGatewayProxyResponse{StatusCode: 400,
+				Body:            `{"status":"error","message":"invalid request body"}`,
+				IsBase64Encoded: false,
+			}, err
+		}
+
+		if err := d.sendPushNotification(pushReq); err != nil {
+			return events.APIGatewayProxyResponse{StatusCode: 500,
+				Body:            fmt.Sprintf(`{"status":"error","message":"%s"}`, err.Error()),
+				IsBase64Encoded: false,
+			}, err
+		}
+
+		return events.APIGatewayProxyResponse{StatusCode: 200,
+			Body:            `{"status":"sent","provider":"FCM"}`,
+			IsBase64Encoded: false,
+		}, nil
+	}
+
 	lc, _ := lambdacontext.FromContext(ctx)
 	region := strings.Split(lc.InvokedFunctionArn, ":")[3]
-  aws_account_id := strings.Split(lc.InvokedFunctionArn, ":")[4]
+	aws_account_id := strings.Split(lc.InvokedFunctionArn, ":")[4]
 
 	urlParam, found := request.QueryStringParameters["url"]
 	if found {
 		urlVal, err := url.QueryUnescape(urlParam)
 		if err != nil {
 			return events.APIGatewayProxyResponse{StatusCode: 500,
-				Body: `{"ImageId":"error"}`,
+				Body:            `{"ImageId":"error"}`,
 				IsBase64Encoded: false,
 			}, err
 		}
 
 		if !isValidExtension(urlVal) {
 			return events.APIGatewayProxyResponse{StatusCode: 500,
-				Body: `{"ImageId":"error"}`,
+				Body:            `{"ImageId":"error"}`,
 				IsBase64Encoded: false,
 			}, errors.New("file extension %s is not valid")
 		}
 
 		processString, processErr := d.processRequest(urlVal, region, aws_account_id)
 		return events.APIGatewayProxyResponse{StatusCode: 200,
-			Body: fmt.Sprintf(`"ImageId":"%s"`, processString),
+			Body:            fmt.Sprintf(`"ImageId":"%s"`, processString),
 			IsBase64Encoded: false,
 		}, processErr
 	}
 
 	return events.APIGatewayProxyResponse{StatusCode: 500,
-		Body: `{"ImageId":"error"}`,
+		Body:            `{"ImageId":"error"}`,
 		IsBase64Encoded: false,
 	}, errors.New("url parameter not found")
 }

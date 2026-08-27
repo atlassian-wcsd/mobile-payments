@@ -25,6 +25,15 @@ Resources:
           Properties:
             Path: /bootstrap
             Method: GET
+        SendNotification:
+          Type: Api
+          Properties:
+            Path: /notifications
+            Method: POST
+      Environment:
+        Variables:
+          PUSH_PROVIDER: FCM
+          FCM_ENDPOINT: https://fcm.googleapis.com/fcm/send
       Tags:
         Name: submitImage
         business_unit: agile_devops_pmm

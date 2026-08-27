@@ -9,6 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +25,11 @@ type mockedPutItem struct {
 	Response dynamodb.PutItemOutput
 }
 
+type mockedHTTPClient struct {
+	response *http.Response
+	err      error
+}
+
 func (d mockedPutOjbect) PutObject(input *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
 	return &d.Response, nil
 }
@@ -30,19 +38,29 @@ func (d mockedPutItem) PutItem(input *dynamodb.PutItemInput) (*dynamodb.PutItemO
 	return &d.Response, nil
 }
 
+func (m mockedHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	return m.response, m.err
+}
+
 func TestHandler(t *testing.T) {
 	t.Run("Successful Request", func(t *testing.T) {
-		mpo := mockedPutOjbect {
+		mpo := mockedPutOjbect{
 			Response: s3.PutObjectOutput{},
 		}
 
-		mpi := mockedPutItem {
+		mpi := mockedPutItem{
 			Response: dynamodb.PutItemOutput{},
 		}
 
 		d := Dependency{
-			DepS3: mpo,
+			DepS3:       mpo,
 			DepDynamoDB: mpi,
+			DepHTTPGet: func(url string) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("test image")),
+				}, nil
+			},
 		}
 
 		ctx := context.Background()
@@ -60,6 +78,64 @@ func TestHandler(t *testing.T) {
 		_, err := d.Handler(ctx, request)
 		if err != nil {
 			t.Fatal(fmt.Sprintf("TestHandler failed with %s", err.Error()))
+		}
+	})
+}
+
+func TestNotificationHandler(t *testing.T) {
+	t.Run("Sends notification when consent is granted", func(t *testing.T) {
+		t.Setenv("PUSH_PROVIDER", "FCM")
+		t.Setenv("FCM_SERVER_KEY", "test-key")
+		t.Setenv("FCM_ENDPOINT", "https://fcm.test/send")
+
+		d := Dependency{
+			DepHTTPClient: mockedHTTPClient{
+				response: &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"success":1}`)),
+				},
+			},
+		}
+
+		request := events.APIGatewayProxyRequest{
+			Path: "/notifications",
+			Body: `{"token":"device-token","title":"Payment update","message":"Payment received","consent":true}`,
+		}
+
+		resp, err := d.Handler(context.Background(), request)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Rejects notification when consent is not granted", func(t *testing.T) {
+		t.Setenv("PUSH_PROVIDER", "FCM")
+		t.Setenv("FCM_SERVER_KEY", "test-key")
+		t.Setenv("FCM_ENDPOINT", "https://fcm.test/send")
+
+		d := Dependency{
+			DepHTTPClient: mockedHTTPClient{
+				response: &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"success":1}`)),
+				},
+			},
+		}
+
+		request := events.APIGatewayProxyRequest{
+			Path: "/notifications",
+			Body: `{"token":"device-token","title":"Payment update","message":"Payment received","consent":false}`,
+		}
+
+		resp, err := d.Handler(context.Background(), request)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("expected status 500, got %d", resp.StatusCode)
 		}
 	})
 }
